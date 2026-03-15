@@ -1,10 +1,12 @@
 # core/retrieval_chain.py
 # Retrieves relevant chunks and generates answer using OpenAI
-# Concept: Retrieval Chain — the final step of RAG
+# Uses modern LCEL (LangChain Expression Language) — no deprecated chains
 
+import os
 from langchain_openai import ChatOpenAI
-from langchain_community.chains import RetrievalQAWithSourcesChain
 from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 from langchain_community.vectorstores import FAISS
 
 
@@ -13,9 +15,11 @@ def create_retrieval_chain(
     api_key: str,
     temperature: float = 0.3,
     k: int = 4
-) -> RetrievalQA:
+):
     """
-    Creates a RetrievalQA chain that:
+    Creates a retrieval chain using modern LCEL syntax.
+
+    Steps:
     1. Converts question to vector
     2. Finds k most relevant chunks from FAISS
     3. Sends chunks + question to OpenAI
@@ -28,11 +32,11 @@ def create_retrieval_chain(
         k           : number of chunks to retrieve (default 4)
 
     Returns:
-        RetrievalQA chain ready to answer questions
+        LCEL chain ready to answer questions
     """
 
-    # Custom prompt — tells the model to use only the PDF context
-    prompt_template = """
+    # Custom prompt — answers only from PDF context
+    prompt_template = PromptTemplate.from_template("""
 You are a helpful assistant that answers questions based on the provided PDF document.
 
 Use ONLY the following context to answer the question.
@@ -46,14 +50,9 @@ Question:
 {question}
 
 Answer:
-"""
+""")
 
-    prompt = PromptTemplate(
-        template=prompt_template,
-        input_variables=["context", "question"]
-    )
-
-    # LLM for generating answers
+    # LLM
     llm = ChatOpenAI(
         model="gpt-3.5-turbo",
         temperature=temperature,
@@ -61,38 +60,50 @@ Answer:
         max_tokens=800
     )
 
-    # Retriever — searches FAISS for relevant chunks
+    # Retriever
     retriever = vector_store.as_retriever(
         search_type="similarity",
         search_kwargs={"k": k}
     )
 
-    # RetrievalQA — connects retriever + LLM + prompt
-    chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",         # "stuff" = stuff all chunks into one prompt
-        retriever=retriever,
-        return_source_documents=True,  # Returns which chunks were used
-        chain_type_kwargs={"prompt": prompt}
+    def format_docs(docs):
+        return "\n\n".join([doc.page_content for doc in docs])
+
+    # LCEL chain: retrieve → format → prompt → llm → parse
+    chain = (
+        {
+            "context": retriever | format_docs,
+            "question": RunnablePassthrough()
+        }
+        | prompt_template
+        | llm
+        | StrOutputParser()
     )
+
+    # Store retriever on chain for source document access
+    chain.retriever = retriever
 
     return chain
 
 
-def ask_question(chain: RetrievalQA, question: str) -> dict:
+def ask_question(chain, question: str) -> dict:
     """
     Asks a question using the retrieval chain.
 
     Args:
-        chain   : RetrievalQA chain
+        chain   : LCEL chain
         question: user's question
 
     Returns:
         dict with 'answer' and 'source_chunks'
     """
-    result = chain.invoke({"query": question})
+    # Get answer
+    answer = chain.invoke(question)
+
+    # Get source chunks separately
+    source_chunks = chain.retriever.invoke(question)
 
     return {
-        "answer": result["result"],
-        "source_chunks": result["source_documents"]
+        "answer": answer,
+        "source_chunks": source_chunks
     }
