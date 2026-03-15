@@ -3,7 +3,7 @@
 # Concept: Retrieval Chain — the final step of RAG
 
 from langchain_openai import ChatOpenAI
-from langchain.chains import RetrievalQA
+from langchain_community.chains import RetrievalQAWithSourcesChain
 from langchain_core.prompts import PromptTemplate
 from langchain_community.vectorstores import FAISS
 
