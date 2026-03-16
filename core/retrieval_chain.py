@@ -81,28 +81,13 @@ Answer:
     )
 
     # Store retriever on chain for source document access
-    chain.retriever = retriever
-
-    return chain
+    return chain, retriever
 
 
-def ask_question(chain, question: str) -> dict:
-    """
-    Asks a question using the retrieval chain.
-
-    Args:
-        chain   : LCEL chain
-        question: user's question
-
-    Returns:
-        dict with 'answer' and 'source_chunks'
-    """
-    # Get answer
+def ask_question(chain_tuple, question: str) -> dict:
+    chain, retriever = chain_tuple
     answer = chain.invoke(question)
-
-    # Get source chunks separately
-    source_chunks = chain.retriever.invoke(question)
-
+    source_chunks = retriever.invoke(question)
     return {
         "answer": answer,
         "source_chunks": source_chunks
